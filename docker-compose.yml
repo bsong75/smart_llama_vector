@@ -1,0 +1,48 @@
+services:
+  llama-container_vector:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    container_name: llama-container_vector
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    environment:
+      - OLLAMA_KEEP_ALIVE=30m
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_MAX_LOADED_MODELS=2
+
+    # when i get NVIDIA GPU  
+    # tmpfs:
+    #   - /tmp
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    # restart: unless-stopped
+    # environment:
+    #   - OLLAMA_KEEP_ALIVE=30m
+    #   - OLLAMA_NUM_PARALLEL=2
+    #   - OLLAMA_MAX_LOADED_MODELS=2
+    #   - OLLAMA_FLASH_ATTENTION=1
+
+  gradio-frontend_vector:
+    build: .
+    ports:
+      - "7862:7860"
+    volumes:
+      - chat_data:/app/data
+    environment:
+      - LLAMA_URL=http://llama-container_vector:11434/v1/chat/completions
+    depends_on:
+      - llama-container_vector
+    container_name: gradio-frontend_vector
+
+volumes:
+  ollama_data:
+  chat_data:
