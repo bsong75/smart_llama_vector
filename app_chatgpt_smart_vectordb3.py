@@ -5,10 +5,10 @@ import os
 from datetime import datetime
 import uuid
 import chromadb
-import numpy as np
+from langchain_ollama import OllamaEmbeddings
 
-LLAMA_URL = "http://llama-container_vector:11434/v1/chat/completions"
-OLLAMA_EMBEDDINGS_URL = "http://llama-container_vector:11434/api/embeddings"
+LLAMA_URL = "http://llama-container:11434/v1/chat/completions"
+OLLAMA_BASE_URL = "http://llama-container:11434"
 DATA_DIR = "/app/data"
 CHAT_SESSIONS_FILE = os.path.join(DATA_DIR, "chat_sessions.json")
 VECTOR_DB_PATH = os.path.join(DATA_DIR, "vector_db")
@@ -18,64 +18,33 @@ chat_sessions = {}
 current_session_id = None
 chroma_client = None
 vector_collection = None
-embedding_model_name = "llama3.2:3b"  # Use your existing Llama model for embeddings
+embedding_model = None
+embedding_model_name = "llama3.2:3b"
 
 def ensure_data_dir():
     """Ensure the data directory exists"""
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(VECTOR_DB_PATH, exist_ok=True)
 
-def get_ollama_embedding(text):
-    """Get embeddings from Ollama API"""
-    try:
-        payload = {
-            "model": embedding_model_name,
-            "prompt": text
-        }
-        
-        response = requests.post(OLLAMA_EMBEDDINGS_URL, 
-                               json=payload, 
-                               timeout=30)
-        
-        if response.status_code == 200:
-            result = response.json()
-            embedding = result.get("embedding", [])
-            if embedding:
-                return embedding
-            else:
-                print(f"⚠️ No embedding returned for text: {text[:50]}...")
-                return None
-        else:
-            print(f"❌ Ollama embeddings API error: {response.status_code} - {response.text}")
-            return None
-            
-    except requests.exceptions.Timeout:
-        print("⏱️ Timeout getting embedding from Ollama")
-        return None
-    except Exception as e:
-        print(f"❌ Error getting embedding from Ollama: {e}")
-        return None
-
-def test_ollama_embeddings():
-    """Test if Ollama embeddings API is working"""
-    test_embedding = get_ollama_embedding("Hello, this is a test.")
-    if test_embedding:
-        print(f"✅ Ollama embeddings working! Dimension: {len(test_embedding)}")
-        return True
-    else:
-        print("❌ Ollama embeddings not available")
-        return False
-
 def initialize_vector_db():
-    """Initialize ChromaDB and test embedding connectivity"""
-    global chroma_client, vector_collection
+    """Initialize ChromaDB and OllamaEmbeddings"""
+    global chroma_client, vector_collection, embedding_model
     
     try:
-        print("🔄 Initializing vector database with Ollama embeddings...")
+        print("🔄 Initializing vector database with OllamaEmbeddings...")
         
-        # Test Ollama embeddings first
-        if not test_ollama_embeddings():
-            raise Exception("Ollama embeddings API not available")
+        # Initialize OllamaEmbeddings
+        embedding_model = OllamaEmbeddings(
+            model=embedding_model_name,
+            base_url=OLLAMA_BASE_URL
+        )
+        
+        # Test embeddings
+        test_embedding = embedding_model.embed_query("Hello, this is a test.")
+        if test_embedding and len(test_embedding) > 0:
+            print(f"✅ OllamaEmbeddings working! Dimension: {len(test_embedding)}")
+        else:
+            raise Exception("Failed to get test embedding")
         
         # Initialize ChromaDB
         chroma_client = chromadb.PersistentClient(path=VECTOR_DB_PATH)
@@ -88,18 +57,18 @@ def initialize_vector_db():
         except:
             vector_collection = chroma_client.create_collection(
                 name="chat_conversations_ollama",
-                metadata={"description": "Semantic search using Ollama embeddings"}
+                metadata={"description": "Semantic search using OllamaEmbeddings"}
             )
-            print("✅ Created new vector collection with Ollama embeddings")
+            print("✅ Created new vector collection with OllamaEmbeddings")
             
     except Exception as e:
         print(f"❌ Error initializing vector database: {e}")
-        print("📝 Make sure Ollama is running and supports embeddings API")
-        print("🔧 Try: ollama pull llama3.2:3b (if not already done)")
+        print("📝 Make sure Ollama is running and langchain_ollama is installed")
+        print("🔧 Install with: pip install langchain-ollama")
 
 def add_conversation_to_vector_db(user_msg, ai_response, session_id):
-    """Add a conversation to the vector database using Ollama embeddings"""
-    if not vector_collection:
+    """Add a conversation to the vector database using OllamaEmbeddings"""
+    if not vector_collection or not embedding_model:
         return
     
     try:
@@ -109,8 +78,8 @@ def add_conversation_to_vector_db(user_msg, ai_response, session_id):
         # Combine user message and AI response for better context
         full_conversation = f"User: {user_msg}\nAssistant: {ai_response}"
         
-        # Generate embedding using Ollama
-        embedding = get_ollama_embedding(full_conversation)
+        # Generate embedding using OllamaEmbeddings
+        embedding = embedding_model.embed_query(full_conversation)
         if not embedding:
             print(f"⚠️ Failed to get embedding, skipping conversation storage")
             return
@@ -139,13 +108,13 @@ def add_conversation_to_vector_db(user_msg, ai_response, session_id):
         print(f"❌ Error adding to vector DB: {e}")
 
 def find_relevant_conversations(query, max_results=3, similarity_threshold=0.7):
-    """Find semantically similar conversations using Ollama embeddings"""
-    if not vector_collection:
+    """Find semantically similar conversations using OllamaEmbeddings"""
+    if not vector_collection or not embedding_model:
         return []
     
     try:
-        # Generate embedding for the query using Ollama
-        query_embedding = get_ollama_embedding(query)
+        # Generate embedding for the query using OllamaEmbeddings
+        query_embedding = embedding_model.embed_query(query)
         if not query_embedding:
             print(f"⚠️ Failed to get embedding for query, no context will be provided")
             return []
@@ -442,7 +411,7 @@ footer {display: none !important}
 }
 """
 
-with gr.Blocks(title="Smart Kusco", theme="soft", css=custom_css) as demo:
+with gr.Blocks(title="Smart Kusco v2", theme="soft", css=custom_css) as demo:
     # State variables
     session_state = gr.State(value=None)
     
@@ -475,7 +444,7 @@ with gr.Blocks(title="Smart Kusco", theme="soft", css=custom_css) as demo:
         # Main chat area
         with gr.Column(scale=3, elem_classes="main-content") as main_area:
             with gr.Column(elem_classes="chat-container"):
-                gr.Markdown("# Smart Kusco with continual learning!")
+                gr.Markdown("# 🚀 Smart Kusco v2 - Semantic Learning with Vector Database!")
                 
                 chatbot = gr.Chatbot(
                     label="Chat History",
@@ -484,7 +453,7 @@ with gr.Blocks(title="Smart Kusco", theme="soft", css=custom_css) as demo:
                 )
                 
                 msg = gr.Textbox(
-                    label="How can I assist you today?", 
+                    label="Ask me anything! (I understand meaning, not just keywords)", 
                     placeholder="Type your question here...",
                     lines=2
                 )
